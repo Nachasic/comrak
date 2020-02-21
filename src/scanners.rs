@@ -85,6 +85,22 @@ pub fn close_code_fence(line: &[u8]) -> Option<usize> {
 }
 
 #[inline(always)]
+pub fn open_latex_fence(line: &[u8]) -> Option<usize> {
+    if line[0] != b'$' {
+        return None
+    }
+    search(Rule::open_latex_fence, line)
+}
+
+#[inline(always)]
+pub fn close_latex_fence(line: &[u8]) -> Option<usize> {
+    if line[0] != b'$' {
+        return None
+    }
+    search(Rule::close_latex_fence, line)
+}
+
+#[inline(always)]
 pub fn html_block_start(line: &[u8]) -> Option<usize> {
     lazy_static! {
         static ref STR2: &'static [u8] = b"<!--";

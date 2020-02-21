@@ -63,6 +63,10 @@ pub enum NodeValue {
     /// which is not parsed as Markdown, although is HTML escaped.
     CodeBlock(NodeCodeBlock),
 
+    /// **Block**. A fenced LaTeX block. Contains raw text
+    /// which is not parsed as Markdown, although is HTML escaped.
+    LaTeXBlock(NodeLatexBlock),
+
     /// **Block**. A [HTML block](https://github.github.com/gfm/#html-blocks).  Contains raw text
     /// which is neither parsed as Markdown nor HTML escaped.
     HtmlBlock(NodeHtmlBlock),
@@ -112,6 +116,9 @@ pub enum NodeValue {
 
     /// **Inline**.  A [code span](https://github.github.com/gfm/#code-spans).
     Code(Vec<u8>),
+
+    /// **Inline**. A LaTeX code span.
+    // LaTeX(Vec<u8>),
 
     /// **Inline**.  [Raw HTML](https://github.github.com/gfm/#raw-html) contained inline.
     HtmlInline(Vec<u8>),
@@ -257,7 +264,22 @@ pub struct NodeCodeBlock {
     /// the opening fence, if any.
     pub info: Vec<u8>,
 
-    /// The literal contents of the code block.  As the contents are not interpreted as Markdown at
+    /// The literal contents of the code block. As the contents are not interpreted as Markdown at
+    /// all, they are contained within this structure, rather than inserted into a child inline of
+    /// any kind.
+    pub literal: Vec<u8>,
+}
+
+/// The metadata and data of a fenced LaTeX block
+#[derive(Default, Debug, Clone)]
+pub struct NodeLatexBlock {
+    /// Length of the fence
+    pub fence_length: usize,
+
+    #[doc(hidden)]
+    pub fence_offset: usize,
+
+    /// Literal contents of the LaTeX block. As the contents are not interpreted as Markdown at
     /// all, they are contained within this structure, rather than inserted into a child inline of
     /// any kind.
     pub literal: Vec<u8>,
@@ -298,6 +320,7 @@ impl NodeValue {
             | NodeValue::DescriptionDetails
             | NodeValue::Item(..)
             | NodeValue::CodeBlock(..)
+            | NodeValue::LaTeXBlock(..)
             | NodeValue::HtmlBlock(..)
             | NodeValue::Paragraph
             | NodeValue::Heading(..)
@@ -312,7 +335,7 @@ impl NodeValue {
     #[doc(hidden)]
     pub fn accepts_lines(&self) -> bool {
         match *self {
-            NodeValue::Paragraph | NodeValue::Heading(..) | NodeValue::CodeBlock(..) => true,
+            NodeValue::Paragraph | NodeValue::Heading(..) | NodeValue::CodeBlock(..) | NodeValue::LaTeXBlock(..) => true,
             _ => false,
         }
     }

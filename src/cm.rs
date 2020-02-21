@@ -427,6 +427,11 @@ impl<'a, 'o> CommonMarkFormatter<'a, 'o> {
                 }
                 self.blankline();
             },
+            NodeValue::LaTeXBlock(ref lxb) => if entering {
+                self.blankline();
+                self.write_all(&lxb.literal).unwrap();
+                self.blankline();
+            },
             NodeValue::HtmlBlock(ref nhb) => if entering {
                 self.blankline();
                 self.write_all(&nhb.literal).unwrap();

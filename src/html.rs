@@ -474,6 +474,12 @@ impl<'o> HtmlFormatter<'o> {
                 self.escape(&ncb.literal)?;
                 self.output.write_all(b"</code></pre>\n")?;
             },
+            NodeValue::LaTeXBlock(ref lxb) => if entering {
+                self.cr()?;
+                self.output.write_all(b"<latex>")?;
+                self.output.write_all(&lxb.literal)?;
+                self.output.write_all(b"</latex>")?;
+            },
             NodeValue::HtmlBlock(ref nhb) => if entering {
                 self.cr()?;
                 if !self.options.render.unsafe_ {

@@ -8,7 +8,7 @@ use entity;
 use nodes;
 use nodes::{
     Ast, AstNode, ListDelimType, ListType, NodeCodeBlock, NodeDescriptionItem,
-    NodeHeading, NodeHtmlBlock, NodeList, NodeValue,
+    NodeHeading, NodeHtmlBlock, NodeList, NodeValue, NodeLatexBlock
 };
 use regex::bytes::Regex;
 use scanners;
@@ -22,6 +22,7 @@ use typed_arena::Arena;
 
 const TAB_STOP: usize = 4;
 const CODE_INDENT: usize = 4;
+const LATEX_FENCE_CHAR: u8 = b'$';
 
 macro_rules! node_matches {
     ($node:expr, $pat:pat) => {{
@@ -595,6 +596,11 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
                         return (false, container, should_continue);
                     }
                 }
+                NodeValue::LaTeXBlock(..) => {
+                    if !self.parse_latex_block_prefix(line, container, ast, &mut should_continue) {
+                        return (false, container, should_continue);
+                    }
+                }
                 NodeValue::HtmlBlock(ref nhb) => if !self.parse_html_block_prefix(nhb.block_type) {
                     return (false, container, should_continue);
                 },
@@ -632,7 +638,7 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
         };
 
         while match container.data.borrow().value {
-            NodeValue::CodeBlock(..) | NodeValue::HtmlBlock(..) => false,
+            NodeValue::CodeBlock(..) | NodeValue::HtmlBlock(..) | NodeValue::LaTeXBlock(..) => false,
             _ => true,
         } {
             self.find_first_nonspace(line);
@@ -685,6 +691,20 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
                     literal: Vec::new(),
                 };
                 *container = self.add_child(*container, NodeValue::CodeBlock(ncb));
+                self.advance_offset(line, first_nonspace + matched - offset, false);
+            } else if !indented
+                && unwrap_into(
+                    scanners::open_latex_fence(&line[self.first_nonspace..]),
+                    &mut matched
+                ) {
+                let first_nonspace = self.first_nonspace;
+                let offset = self.offset;
+                let nlb = NodeLatexBlock {
+                    fence_length: matched,
+                    fence_offset: first_nonspace - offset,
+                    literal: Vec::new()
+                };
+                *container = self.add_child(*container, NodeValue::LaTeXBlock(nlb));
                 self.advance_offset(line, first_nonspace + matched - offset, false);
             } else if !indented
                 && (unwrap_into(
@@ -980,6 +1000,41 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
         true
     }
 
+    fn parse_latex_block_prefix(
+        &mut self,
+        line: &[u8],
+        container: &'a AstNode<'a>,
+        ast: &mut Ast,
+        should_continue: &mut bool,
+    ) -> bool {
+        let (fence_offset, fence_length) = match ast.value {
+            NodeValue::LaTeXBlock(ref lxb) => (
+                lxb.fence_offset,
+                lxb.fence_length
+            ),
+            _ => unreachable!()
+        };
+        let matched = if line[self.first_nonspace] == LATEX_FENCE_CHAR {
+            scanners::close_latex_fence(&line[self.first_nonspace..]).unwrap_or(0)
+        } else {
+            0
+        };
+
+        if matched >= fence_length {
+            *should_continue = false;
+            self.advance_offset(line, matched, false);
+            self.current = self.finalize_borrowed(container, ast).unwrap();
+            return false
+        }
+
+        let mut i = fence_offset;
+        while i > 0 && strings::is_space_or_tab(line[self.offset]) {
+            self.advance_offset(line, 1, true);
+            i -= 1;
+        }
+        true
+    }
+
     fn parse_html_block_prefix(&mut self, t: u8) -> bool {
         match t {
             1 | 2 | 3 | 4 | 5 => true,
@@ -1064,6 +1119,8 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
             && match container.data.borrow().value {
                 NodeValue::BlockQuote | NodeValue::Heading(..) | NodeValue::ThematicBreak => false,
                 NodeValue::CodeBlock(ref ncb) => !ncb.fenced,
+                // LaTeX blocks are always fenced
+                NodeValue::LaTeXBlock(..) => false,
                 NodeValue::Item(..) => {
                     container.first_child().is_some()
                         || container.data.borrow().start_line != self.line_number
@@ -1091,12 +1148,16 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
 
             let add_text_result = match container.data.borrow().value {
                 NodeValue::CodeBlock(..) => AddTextResult::CodeBlock,
+                NodeValue::LaTeXBlock(..) => AddTextResult::LaTeXBlock,
                 NodeValue::HtmlBlock(ref nhb) => AddTextResult::HtmlBlock(nhb.block_type),
                 _ => AddTextResult::Otherwise,
             };
 
             match add_text_result {
                 AddTextResult::CodeBlock => {
+                    self.add_line(container, line);
+                }
+                AddTextResult::LaTeXBlock => {
                     self.add_line(container, line);
                 }
                 AddTextResult::HtmlBlock(block_type) => {
@@ -1272,6 +1333,23 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
                     *content = content[pos..].to_vec();
                 }
                 mem::swap(&mut ncb.literal, content);
+            }
+            NodeValue::LaTeXBlock(ref mut lxb) => {
+                let mut pos = 0;
+                while pos < content.len() {
+                    if strings::is_line_end_char(content[pos]) {
+                        break;
+                    }
+                    pos += 1;
+                }
+                assert!(pos< content.len());
+
+                if content[pos] == b'\r' || content[pos] == b'\n' {
+                    pos += 1;
+                }
+
+                *content = content[pos..].to_vec();
+                mem::swap(&mut lxb.literal, content);
             }
             NodeValue::HtmlBlock(ref mut nhb) => {
                 mem::swap(&mut nhb.literal, content);
@@ -1593,6 +1671,7 @@ impl<'a, 'o, 'c> Parser<'a, 'o, 'c> {
 
 enum AddTextResult {
     CodeBlock,
+    LaTeXBlock,
     HtmlBlock(u8),
     Otherwise,
 }
